@@ -1,36 +1,66 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# DeviceIQ Frontend
+
+DeviceIQ is a platform that helps mobile teams prioritize and orchestrate testing across real-world devices based on actual user behavior. This frontend allows you to upload device usage data, generate a test matrix, assign test flows, and view analytics.
+
+## Features
+
+- Upload device usage data (CSV)
+- Generate a prioritized device matrix
+- Visualize coverage and analytics (charts)
+- Assign test flows to device/OS combinations
+- Download test plans as CSV
 
 ## Getting Started
 
-First, run the development server:
+### Prerequisites
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+- Node.js (v16+)
+- npm or yarn
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+### Installation
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+1. Clone the repository:
+   ```sh
+   git clone https://github.com/your-org/deviceiq-frontend.git
+   cd deviceiq-frontend
+   ```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+2. Install dependencies:
+   ```sh
+   npm install
+   # or
+   yarn install
+   ```
 
-## Learn More
+3. Start the development server:
+   ```sh
+   npm run dev
+   # or
+   yarn dev
+   ```
 
-To learn more about Next.js, take a look at the following resources:
+4. Open your browser to:
+   ```
+   http://localhost:3000
+   ```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Usage
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+1. Upload a CSV file with columns: `device_model`, `os_version`, `usage_percent`.
+2. Generate the device matrix and assign test flows.
+3. View analytics on the Analytics tab.
+4. Download your test plan if needed.
 
-## Deploy on Vercel
+## Configuration
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+- The frontend expects the backend API at `http://localhost:8000` by default.
+- Update API URLs in the code if your backend runs elsewhere.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Project Structure
+
+- `app/page.tsx` — Main dashboard and analytics logic
+- `components/ui/` — UI components
+
+## License
+
+MIT
