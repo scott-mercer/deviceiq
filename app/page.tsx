@@ -7,7 +7,7 @@ import { Input } from '@/components/ui/input';
 import { Table, TableRow, TableCell, TableBody } from '@/components/ui/table';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Progress } from '@/components/ui/progress';
-import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
+import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, LineChart, Line, ResponsiveContainer } from 'recharts';
 
 const TEST_FLOWS = ['LoginTest', 'SearchTest', 'AddToCartTest', 'CheckoutTest'];
 
@@ -37,6 +37,13 @@ export default function DeviceIQDashboard() {
   const [errorMsg, setErrorMsg] = useState('');
   const [aboutOpen, setAboutOpen] = useState(false);
   const [page, setPage] = useState<'home' | 'analytics'>('home');
+  const [analyticsData, setAnalyticsData] = useState<{
+    usage_distribution: any[];
+    cumulative_curve: any[];
+    os_version_breakdown: any[];
+  } | null>(null);
+  const [analyticsLoading, setAnalyticsLoading] = useState(false);
+  const [analyticsError, setAnalyticsError] = useState('');
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
@@ -95,6 +102,40 @@ export default function DeviceIQDashboard() {
 
     setSummary(result.summary);
     setLoading(false);
+  };
+
+  const handleFetchAnalytics = async () => {
+    if (!csvFile) return;
+    setAnalyticsLoading(true);
+    setAnalyticsError('');
+    setAnalyticsData(null);
+
+    const formData = new FormData();
+    formData.append('file', csvFile);
+
+    try {
+      const res = await fetch(
+        `http://localhost:8000/analytics/${groupBy ? `?group_by=${groupBy}` : ""}`,
+        {
+          method: 'POST',
+          body: formData,
+          headers: {
+            'x-api-key': 'your-secret-api-key',
+          },
+        }
+      );
+      if (!res.ok) {
+        const error = await res.json();
+        setAnalyticsError(error.detail || "Unknown error");
+        setAnalyticsLoading(false);
+        return;
+      }
+      const data = await res.json();
+      setAnalyticsData(data);
+    } catch (err) {
+      setAnalyticsError('Failed to fetch analytics');
+    }
+    setAnalyticsLoading(false);
   };
 
   const handleCheckboxChange = (deviceKey: string, flow: string) => {
@@ -354,42 +395,60 @@ export default function DeviceIQDashboard() {
       {page === 'analytics' && (
         <div className="p-6 max-w-5xl mx-auto space-y-8">
           <h1 className="text-2xl font-bold mb-4">Analytics</h1>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-            {/* Coverage Pie Chart */}
-            <div>
-              <h2 className="font-semibold mb-2">Coverage</h2>
-              <ResponsiveContainer width="100%" height={250}>
-                <PieChart>
-                  <Pie
-                    data={coverageData}
-                    dataKey="value"
-                    nameKey="name"
-                    cx="50%"
-                    cy="50%"
-                    outerRadius={80}
-                    label
-                  >
-                    {coverageData.map((entry, idx) => (
-                      <Cell key={`cell-${idx}`} fill={COLORS[idx % COLORS.length]} />
-                    ))}
-                  </Pie>
-                  <Tooltip />
-                </PieChart>
-              </ResponsiveContainer>
+          <Button onClick={handleFetchAnalytics} disabled={analyticsLoading || !csvFile}>
+            {analyticsLoading ? "Loading..." : "Show Analytics"}
+          </Button>
+          {analyticsError && <div className="text-red-600">{analyticsError}</div>}
+          {analyticsData && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mt-6">
+              {/* Usage Distribution Bar Chart */}
+              <div>
+                <h2 className="font-semibold mb-2">Device/OS Usage Distribution</h2>
+                <ResponsiveContainer width="100%" height={250}>
+                  <BarChart data={analyticsData.usage_distribution.slice(0, 10)}>
+                    <XAxis dataKey="device_model" />
+                    <YAxis />
+                    <Tooltip />
+                    <Bar dataKey="usage_percent" fill="#8884d8" />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+              {/* OS Version Breakdown Pie Chart */}
+              <div>
+                <h2 className="font-semibold mb-2">OS Version Breakdown</h2>
+                <ResponsiveContainer width="100%" height={250}>
+                  <PieChart>
+                    <Pie
+                      data={analyticsData.os_version_breakdown}
+                      dataKey="usage_percent"
+                      nameKey="os_version"
+                      cx="50%"
+                      cy="50%"
+                      outerRadius={80}
+                      label
+                    >
+                      {analyticsData.os_version_breakdown.map((entry, idx) => (
+                        <Cell key={`cell-${idx}`} fill={COLORS[idx % COLORS.length]} />
+                      ))}
+                    </Pie>
+                    <Tooltip />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+              {/* Cumulative Coverage Line Chart */}
+              <div className="col-span-2">
+                <h2 className="font-semibold mb-2">Cumulative Coverage Curve</h2>
+                <ResponsiveContainer width="100%" height={250}>
+                  <LineChart data={analyticsData.cumulative_curve}>
+                    <XAxis dataKey="device_model" />
+                    <YAxis />
+                    <Tooltip />
+                    <Line type="monotone" dataKey="cumulative_coverage" stroke="#4ade80" />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
             </div>
-            {/* Device Usage Bar Chart */}
-            <div>
-              <h2 className="font-semibold mb-2">Top Devices by Usage</h2>
-              <ResponsiveContainer width="100%" height={250}>
-                <BarChart data={matrix.slice(0, 10)}>
-                  <XAxis dataKey="device_model" />
-                  <YAxis />
-                  <Tooltip />
-                  <Bar dataKey="usage_percent" fill="#8884d8" />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
+          )}
         </div>
       )}
     </div>
