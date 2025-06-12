@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -44,6 +44,8 @@ export default function DeviceIQDashboard() {
   } | null>(null);
   const [analyticsLoading, setAnalyticsLoading] = useState(false);
   const [analyticsError, setAnalyticsError] = useState('');
+  const [pinnedDevices, setPinnedDevices] = useState<Set<string>>(new Set());
+  const [excludedDevices, setExcludedDevices] = useState<Set<string>>(new Set());
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
@@ -84,14 +86,30 @@ export default function DeviceIQDashboard() {
 
     const result = await res.json();
 
-    result.matrix.forEach((device: { cumulative_coverage: number } & { [key: string]: any }) => {
-      device.include_in_matrix = device.cumulative_coverage <= threshold;
+    // Apply exclusion
+    let filteredMatrix = result.matrix.filter((device: any) => {
+      const key = `${device.device_model}_${device.os_version}`;
+      return !excludedDevices.has(key);
     });
-    setMatrix(result.matrix);
+
+    // Always include pinned devices
+    const pinnedRows = result.matrix.filter((device: any) => {
+      const key = `${device.device_model}_${device.os_version}`;
+      return pinnedDevices.has(key);
+    });
+
+    // Remove duplicates if a pinned device is already in filteredMatrix
+    const pinnedKeys = new Set(pinnedRows.map((d: any) => `${d.device_model}_${d.os_version}`));
+    filteredMatrix = [
+      ...pinnedRows,
+      ...filteredMatrix.filter((d: any) => !pinnedKeys.has(`${d.device_model}_${d.os_version}`))
+    ];
+
+    setMatrix(filteredMatrix);
 
     // Default plan: all flows enabled per device
     const defaultPlan: Record<string, string[]> = {};
-    result.matrix.forEach((device: { device_model: string; os_version: string; usage_percent: number }) => {
+    filteredMatrix.forEach((device: { device_model: string; os_version: string; usage_percent: number }) => {
       const key = `${device.device_model}_${device.os_version}`;
       defaultPlan[key] = [...TEST_FLOWS];
     });
@@ -151,10 +169,20 @@ export default function DeviceIQDashboard() {
   };
 
   const handleDownloadPlan = () => {
-    const data = Object.entries(testPlan).map(([deviceKey, flows]) => {
-      const [device_model, os_version] = deviceKey.split('_');
-      return { device_model, os_version, flows: flows.join(',') };
-    });
+    // Only include devices currently in the matrix and not excluded
+    const data = matrix
+      .filter(device => {
+        const deviceKey = `${device.device_model}_${device.os_version}`;
+        return !excludedDevices.has(deviceKey);
+      })
+      .map(device => {
+        const deviceKey = `${device.device_model}_${device.os_version}`;
+        return {
+          device_model: device.device_model,
+          os_version: device.os_version,
+          flows: (testPlan[deviceKey] || []).join(',')
+        };
+      });
     const csvContent =
       'Device Model,OS Version,Test Flows\n' +
       data.map(row =>
@@ -177,6 +205,14 @@ export default function DeviceIQDashboard() {
     { name: 'Covered', value: summary?.covered_usage_percent ?? 0 },
     { name: 'Uncovered', value: summary ? summary.total_usage_percent - summary.covered_usage_percent : 0 }
   ];
+
+  useEffect(() => {
+    const covered = matrix.reduce((sum, d) => {
+      const key = `${d.device_model}_${d.os_version}`;
+      return excludedDevices.has(key) ? sum : sum + (d.usage_percent || 0);
+    }, 0);
+    setCoverage(Number(covered.toFixed(2)));
+  }, [matrix, excludedDevices]);
 
   return (
     <div>
@@ -316,9 +352,9 @@ export default function DeviceIQDashboard() {
                 {summary && (
                   <div className="mb-4 space-y-1 text-sm text-gray-700">
                     <div><strong>Total Devices:</strong> {summary.total_devices}</div>
-                    <div><strong>Included in Matrix:</strong> {summary.included_devices}</div>
+                    <div><strong>Included in Matrix:</strong> {matrix.length}</div>
                     <div><strong>Total Usage %:</strong> {summary.total_usage_percent}</div>
-                    <div><strong>Covered Usage %:</strong> {summary.covered_usage_percent}</div>
+                    <div><strong>Covered Usage %:</strong> {coverage}</div>
                   </div>
                 )}
 
@@ -345,6 +381,7 @@ export default function DeviceIQDashboard() {
                       (device.os_version?.toLowerCase().includes(filter.toLowerCase()) ?? false)
                     ).map((device, idx) => {
                       const deviceKey = `${device.device_model}_${device.os_version}`;
+                      const isExcluded = excludedDevices.has(deviceKey);
                       return (
                         <TableRow className={idx % 2 === 0 ? "bg-gray-50" : ""} key={idx}>
                           <TableCell>{device.device_model}</TableCell>
@@ -356,11 +393,10 @@ export default function DeviceIQDashboard() {
                                 <label key={flow} className="flex items-center space-x-2">
                                   <Checkbox
                                     checked={testPlan[deviceKey]?.includes(flow)}
-                                    onCheckedChange={() =>
-                                      handleCheckboxChange(deviceKey, flow)
-                                    }
+                                    onCheckedChange={() => handleCheckboxChange(deviceKey, flow)}
+                                    disabled={isExcluded}
                                   />
-                                  <span>{flow}</span>
+                                  <span className={isExcluded ? "text-gray-400 line-through" : ""}>{flow}</span>
                                 </label>
                               ))}
                               <span className="text-xs text-gray-500 ml-2">
@@ -375,9 +411,39 @@ export default function DeviceIQDashboard() {
                                     [deviceKey]: prev[deviceKey].length === TEST_FLOWS.length ? [] : [...TEST_FLOWS]
                                   }))
                                 }
+                                disabled={isExcluded}
                               >
                                 {testPlan[deviceKey]?.length === TEST_FLOWS.length ? 'Deselect All' : 'Select All'}
                               </Button>
+                              <div className="flex space-x-2 mt-2">
+                                <Button
+                                  size="sm"
+                                  variant={pinnedDevices.has(deviceKey) ? "default" : "outline"}
+                                  onClick={() => {
+                                    setPinnedDevices(prev => {
+                                      const next = new Set(prev);
+                                      next.has(deviceKey) ? next.delete(deviceKey) : next.add(deviceKey);
+                                      return next;
+                                    });
+                                  }}
+                                  disabled={isExcluded}
+                                >
+                                  {pinnedDevices.has(deviceKey) ? "Pinned" : "Pin"}
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant={isExcluded ? "destructive" : "outline"}
+                                  onClick={() => {
+                                    setExcludedDevices(prev => {
+                                      const next = new Set(prev);
+                                      next.has(deviceKey) ? next.delete(deviceKey) : next.add(deviceKey);
+                                      return next;
+                                    });
+                                  }}
+                                >
+                                  {isExcluded ? "Excluded" : "Exclude"}
+                                </Button>
+                              </div>
                             </div>
                           </TableCell>
                         </TableRow>
