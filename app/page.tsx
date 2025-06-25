@@ -8,6 +8,7 @@ import { Table, TableRow, TableCell, TableBody } from '@/components/ui/table';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Progress } from '@/components/ui/progress';
 import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, LineChart, Line, ResponsiveContainer } from 'recharts';
+import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
 
 const TEST_FLOWS = ['LoginTest', 'SearchTest', 'AddToCartTest', 'CheckoutTest'];
 
@@ -46,6 +47,9 @@ export default function DeviceIQDashboard() {
   const [analyticsError, setAnalyticsError] = useState('');
   const [pinnedDevices, setPinnedDevices] = useState<Set<string>>(new Set());
   const [excludedDevices, setExcludedDevices] = useState<Set<string>>(new Set());
+  const [exportFormat, setExportFormat] = useState<'csv' | 'json'>('csv');
+  type ExecutionStatus = 'pending' | 'running' | 'passed' | 'failed';
+  const [executionResults, setExecutionResults] = useState<Record<string, Record<string, ExecutionStatus>>>({});
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
@@ -169,7 +173,6 @@ export default function DeviceIQDashboard() {
   };
 
   const handleDownloadPlan = () => {
-    // Only include devices currently in the matrix and not excluded
     const data = matrix
       .filter(device => {
         const deviceKey = `${device.device_model}_${device.os_version}`;
@@ -180,19 +183,27 @@ export default function DeviceIQDashboard() {
         return {
           device_model: device.device_model,
           os_version: device.os_version,
-          flows: (testPlan[deviceKey] || []).join(',')
+          flows: testPlan[deviceKey] || []
         };
       });
-    const csvContent =
-      'Device Model,OS Version,Test Flows\n' +
-      data.map(row =>
-        [row.device_model, row.os_version, row.flows].join(',')
-      ).join('\n');
-    const blob = new Blob([csvContent], { type: 'text/csv' });
+
+    let blob, filename;
+    if (exportFormat === 'json') {
+      blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      filename = 'test-plan.json';
+    } else {
+      const csvContent =
+        'Device Model,OS Version,Test Flows\n' +
+        data.map(row =>
+          [row.device_model, row.os_version, row.flows.join('|')].join(',')
+        ).join('\n');
+      blob = new Blob([csvContent], { type: 'text/csv' });
+      filename = 'test-plan.csv';
+    }
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'test-plan.csv';
+    a.download = filename;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -213,6 +224,17 @@ export default function DeviceIQDashboard() {
     }, 0);
     setCoverage(Number(covered.toFixed(2)));
   }, [matrix, excludedDevices]);
+
+  // Helper to update status
+  const updateExecutionStatus = (deviceKey: string, flow: string, status: ExecutionStatus) => {
+    setExecutionResults(prev => ({
+      ...prev,
+      [deviceKey]: {
+        ...(prev[deviceKey] || {}),
+        [flow]: status
+      }
+    }));
+  };
 
   return (
     <div>
@@ -388,62 +410,105 @@ export default function DeviceIQDashboard() {
                           <TableCell>{device.os_version}</TableCell>
                           <TableCell>{device.usage_percent}%</TableCell>
                           <TableCell>
-                            <div className="flex flex-col space-y-1">
-                              {TEST_FLOWS.map((flow) => (
-                                <label key={flow} className="flex items-center space-x-2">
-                                  <Checkbox
-                                    checked={testPlan[deviceKey]?.includes(flow)}
-                                    onCheckedChange={() => handleCheckboxChange(deviceKey, flow)}
-                                    disabled={isExcluded}
-                                  />
-                                  <span className={isExcluded ? "text-gray-400 line-through" : ""}>{flow}</span>
-                                </label>
-                              ))}
-                              <span className="text-xs text-gray-500 ml-2">
-                                {testPlan[deviceKey]?.length || 0}/{TEST_FLOWS.length} selected
-                              </span>
+                            <div>
+                              {/* Draggable selected flows */}
+                              <DragDropContext
+                                onDragEnd={result => {
+                                  if (!result.destination) return;
+                                  const deviceKey = `${device.device_model}_${device.os_version}`;
+                                  setTestPlan(prev => {
+                                    const flows = Array.from(prev[deviceKey] || []);
+                                    const [removed] = flows.splice(result.source.index, 1);
+                                    if (result.destination) {
+                                      flows.splice(result.destination.index, 0, removed);
+                                    }
+                                    return { ...prev, [deviceKey]: flows };
+                                  });
+                                }}
+                              >
+                                <Droppable droppableId={deviceKey}>
+                                  {(provided) => (
+                                    <div ref={provided.innerRef} {...provided.droppableProps}>
+                                      {(testPlan[deviceKey] || []).map((flow, idx) => (
+                                        <Draggable key={flow} draggableId={flow} index={idx}>
+                                          {(provided) => (
+                                            <div
+                                              ref={provided.innerRef}
+                                              {...provided.draggableProps}
+                                              {...provided.dragHandleProps}
+                                              className="flex items-center space-x-2 mb-1 bg-gray-100 rounded px-2 py-1"
+                                            >
+                                              <Checkbox
+                                                checked
+                                                onCheckedChange={() => handleCheckboxChange(deviceKey, flow)}
+                                                disabled={excludedDevices.has(deviceKey)}
+                                              />
+                                              <span className={excludedDevices.has(deviceKey) ? "text-gray-400 line-through" : ""}>{flow}</span>
+                                              <select
+                                                value={executionResults[deviceKey]?.[flow] || 'pending'}
+                                                onChange={e => updateExecutionStatus(deviceKey, flow, e.target.value as ExecutionStatus)}
+                                                className="border rounded px-1 py-0 text-xs"
+                                                disabled={excludedDevices.has(deviceKey)}
+                                              >
+                                                <option value="pending">Pending</option>
+                                                <option value="running">Running</option>
+                                                <option value="passed">Passed</option>
+                                                <option value="failed">Failed</option>
+                                              </select>
+                                            </div>
+                                          )}
+                                        </Draggable>
+                                      ))}
+                                      {provided.placeholder}
+                                    </div>
+                                  )}
+                                </Droppable>
+                              </DragDropContext>
+                              {/* Unselected flows */}
+                              <div className="mt-2">
+                                {TEST_FLOWS.filter(flow => !(testPlan[deviceKey] || []).includes(flow)).map(flow => (
+                                  <div key={flow} className="flex items-center space-x-2 mb-1">
+                                    <Checkbox
+                                      checked={false}
+                                      onCheckedChange={() => handleCheckboxChange(deviceKey, flow)}
+                                      disabled={excludedDevices.has(deviceKey)}
+                                    />
+                                    <span className="text-gray-400 italic">{flow}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                            <span className="text-xs text-gray-500 ml-2">
+                              {testPlan[deviceKey]?.length || 0}/{TEST_FLOWS.length} selected
+                            </span>
+                            <div className="flex space-x-2 mt-2">
                               <Button
                                 size="sm"
-                                variant="outline"
-                                onClick={() =>
-                                  setTestPlan(prev => ({
-                                    ...prev,
-                                    [deviceKey]: prev[deviceKey].length === TEST_FLOWS.length ? [] : [...TEST_FLOWS]
-                                  }))
-                                }
+                                variant={pinnedDevices.has(deviceKey) ? "default" : "outline"}
+                                onClick={() => {
+                                  setPinnedDevices(prev => {
+                                    const next = new Set(prev);
+                                    next.has(deviceKey) ? next.delete(deviceKey) : next.add(deviceKey);
+                                    return next;
+                                  });
+                                }}
                                 disabled={isExcluded}
                               >
-                                {testPlan[deviceKey]?.length === TEST_FLOWS.length ? 'Deselect All' : 'Select All'}
+                                {pinnedDevices.has(deviceKey) ? "Pinned" : "Pin"}
                               </Button>
-                              <div className="flex space-x-2 mt-2">
-                                <Button
-                                  size="sm"
-                                  variant={pinnedDevices.has(deviceKey) ? "default" : "outline"}
-                                  onClick={() => {
-                                    setPinnedDevices(prev => {
-                                      const next = new Set(prev);
-                                      next.has(deviceKey) ? next.delete(deviceKey) : next.add(deviceKey);
-                                      return next;
-                                    });
-                                  }}
-                                  disabled={isExcluded}
-                                >
-                                  {pinnedDevices.has(deviceKey) ? "Pinned" : "Pin"}
-                                </Button>
-                                <Button
-                                  size="sm"
-                                  variant={isExcluded ? "destructive" : "outline"}
-                                  onClick={() => {
-                                    setExcludedDevices(prev => {
-                                      const next = new Set(prev);
-                                      next.has(deviceKey) ? next.delete(deviceKey) : next.add(deviceKey);
-                                      return next;
-                                    });
-                                  }}
-                                >
-                                  {isExcluded ? "Excluded" : "Exclude"}
-                                </Button>
-                              </div>
+                              <Button
+                                size="sm"
+                                variant={isExcluded ? "destructive" : "outline"}
+                                onClick={() => {
+                                  setExcludedDevices(prev => {
+                                    const next = new Set(prev);
+                                    next.has(deviceKey) ? next.delete(deviceKey) : next.add(deviceKey);
+                                    return next;
+                                  });
+                                }}
+                              >
+                                {isExcluded ? "Excluded" : "Exclude"}
+                              </Button>
                             </div>
                           </TableCell>
                         </TableRow>
@@ -451,7 +516,18 @@ export default function DeviceIQDashboard() {
                     })}
                   </TableBody>
                 </Table>
-                <Button onClick={handleDownloadPlan}>Download Test Plan</Button>
+                <div className="flex items-center space-x-2 mb-4">
+                  <label>Export as:</label>
+                  <select
+                    value={exportFormat}
+                    onChange={e => setExportFormat(e.target.value as 'csv' | 'json')}
+                    className="border rounded px-2 py-1"
+                  >
+                    <option value="csv">CSV</option>
+                    <option value="json">JSON</option>
+                  </select>
+                  <Button onClick={handleDownloadPlan}>Download Test Plan</Button>
+                </div>
               </CardContent>
             </Card>
           )}
