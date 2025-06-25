@@ -37,7 +37,7 @@ export default function DeviceIQDashboard() {
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [aboutOpen, setAboutOpen] = useState(false);
-  const [page, setPage] = useState<'home' | 'analytics'>('home');
+  const [page, setPage] = useState<'home' | 'analytics' | 'testplans'>('home');
   const [analyticsData, setAnalyticsData] = useState<{
     usage_distribution: any[];
     cumulative_curve: any[];
@@ -50,6 +50,8 @@ export default function DeviceIQDashboard() {
   const [exportFormat, setExportFormat] = useState<'csv' | 'json'>('csv');
   type ExecutionStatus = 'pending' | 'running' | 'passed' | 'failed';
   const [executionResults, setExecutionResults] = useState<Record<string, Record<string, ExecutionStatus>>>({});
+  const [testPlans, setTestPlans] = useState<{ id: string; name: string; data: any }[]>([]);
+  const [selectedPlan, setSelectedPlan] = useState<string | null>(null);
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
@@ -236,6 +238,43 @@ export default function DeviceIQDashboard() {
     }));
   };
 
+  // Helper to import a plan
+  const handleImportPlan = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files.length > 0) {
+      const file = e.target.files[0];
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        try {
+          const data = JSON.parse(event.target?.result as string);
+          setTestPlans(prev => [
+            ...prev,
+            { id: Date.now().toString(), name: file.name, data }
+          ]);
+        } catch {
+          alert("Invalid plan file.");
+        }
+      };
+      reader.readAsText(file);
+    }
+  };
+
+  // Helper to download a plan
+  const handleDownloadSavedPlan = (plan: { id: string; name: string; data: any }) => {
+    const blob = new Blob([JSON.stringify(plan.data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = plan.name.endsWith('.json') ? plan.name : `${plan.name}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  // Helper to delete a plan
+  const handleDeletePlan = (id: string) => {
+    setTestPlans(prev => prev.filter(plan => plan.id !== id));
+    if (selectedPlan === id) setSelectedPlan(null);
+  };
+
   return (
     <div>
       {/* Navigation Bar */}
@@ -256,7 +295,13 @@ export default function DeviceIQDashboard() {
           >
             Analytics
           </a>
-          <a href="#" className="hover:text-blue-400 transition">Test Plans</a>
+          <a
+            href="#"
+            className={`hover:text-blue-400 transition ${page === 'testplans' ? 'font-semibold underline underline-offset-4' : ''}`}
+            onClick={() => setPage('testplans')}
+          >
+            Test Plans
+          </a>
           <a href="#" className="hover:text-blue-400 transition">Settings</a>
           <a href="#" className="hover:text-blue-400 transition">Docs</a>
           <button
@@ -590,6 +635,107 @@ export default function DeviceIQDashboard() {
                 </ResponsiveContainer>
               </div>
             </div>
+          )}
+        </div>
+      )}
+
+      {page === 'testplans' && (
+        <div className="p-6 max-w-3xl mx-auto space-y-8">
+          <h1 className="text-2xl font-bold mb-4">Test Plans</h1>
+          <div className="mb-4">
+            <label className="mr-2">Import Plan:</label>
+            <Input type="file" accept=".json" onChange={handleImportPlan} />
+          </div>
+          <Card>
+            <CardContent>
+              <h2 className="text-lg font-semibold mb-2">Saved Plans</h2>
+              <ul className="divide-y">
+                {testPlans.map(plan => (
+                  <li key={plan.id} className="flex items-center justify-between py-2">
+                    <span
+                      className={`cursor-pointer ${selectedPlan === plan.id ? "font-bold" : ""}`}
+                      onClick={() => setSelectedPlan(plan.id)}
+                    >
+                      {plan.name}
+                    </span>
+                    <div className="flex space-x-2">
+                      <Button size="sm" onClick={() => handleDownloadSavedPlan(plan)}>Download</Button>
+                      <Button size="sm" variant="destructive" onClick={() => handleDeletePlan(plan.id)}>Delete</Button>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </CardContent>
+          </Card>
+          {selectedPlan && (
+            <Card>
+              <CardContent>
+                <h3 className="font-semibold mb-2">Plan Details</h3>
+                {(() => {
+                  const plan = testPlans.find(p => p.id === selectedPlan);
+                  if (!plan) return null;
+                  const rows = Array.isArray(plan.data) ? plan.data : [];
+                  return (
+                    <>
+                      <div className="mb-4 text-sm text-gray-700">
+                        <div><strong>Devices:</strong> {rows.length}</div>
+                        <div>
+                          <strong>Total Flows:</strong>{" "}
+                          {rows.reduce((sum, row) => sum + (row.flows?.length || 0), 0)}
+                        </div>
+                      </div>
+                      <Table>
+                        <thead>
+                          <TableRow>
+                            <th className="px-4 py-2 text-left">Device Model</th>
+                            <th className="px-4 py-2 text-left">OS Version</th>
+                            <th className="px-4 py-2 text-left">Test Flows</th>
+                          </TableRow>
+                        </thead>
+                        <TableBody>
+                          {rows.map((row, idx) => (
+                            <TableRow key={idx}>
+                              <TableCell>{row.device_model}</TableCell>
+                              <TableCell>{row.os_version}</TableCell>
+                              <TableCell>
+                                {(row.flows || []).length > 0
+                                  ? (row.flows || []).join(', ')
+                                  : <span className="text-gray-400 italic">None</span>}
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </>
+                  );
+                })()}
+              </CardContent>
+            </Card>
+          )}
+          {selectedPlan && (
+            <Button
+              size="sm"
+              onClick={() => {
+                const plan = testPlans.find(p => p.id === selectedPlan);
+                if (plan && Array.isArray(plan.data)) {
+                  // Convert plan.data back to your matrix and testPlan state shape
+                  setMatrix(plan.data.map(({ device_model, os_version, usage_percent }) => ({
+                    device_model,
+                    os_version,
+                    usage_percent: usage_percent ?? 0
+                  })));
+                  const newTestPlan: Record<string, string[]> = {};
+                  plan.data.forEach((row: any) => {
+                    const key = `${row.device_model}_${row.os_version}`;
+                    newTestPlan[key] = row.flows || [];
+                  });
+                  setTestPlan(newTestPlan);
+                  setPage('home');
+                }
+              }}
+            >
+              Load into Dashboard
+            </Button>
           )}
         </div>
       )}
