@@ -4,11 +4,13 @@ import React, { useState, useEffect } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
 import { Table, TableRow, TableCell, TableBody } from '@/components/ui/table';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Progress } from '@/components/ui/progress';
 import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, LineChart, Line, ResponsiveContainer } from 'recharts';
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
+import { AppiumLogViewer } from "@/components/AppiumLogViewer";
 
 const TEST_FLOWS = ['LoginTest', 'SearchTest', 'AddToCartTest', 'CheckoutTest'];
 
@@ -37,7 +39,7 @@ export default function DeviceIQDashboard() {
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [aboutOpen, setAboutOpen] = useState(false);
-  const [page, setPage] = useState<'home' | 'analytics' | 'testplans'>('home');
+  const [page, setPage] = useState<'home' | 'analytics' | 'testplans' | 'devicelab'>('home');
   const [analyticsData, setAnalyticsData] = useState<{
     usage_distribution: any[];
     cumulative_curve: any[];
@@ -52,6 +54,24 @@ export default function DeviceIQDashboard() {
   const [executionResults, setExecutionResults] = useState<Record<string, Record<string, ExecutionStatus>>>({});
   const [testPlans, setTestPlans] = useState<{ id: string; name: string; data: any }[]>([]);
   const [selectedPlan, setSelectedPlan] = useState<string | null>(null);
+  const [deviceLabPrompt, setDeviceLabPrompt] = useState("");
+  const [deviceLabResponse, setDeviceLabResponse] = useState<string | null>(null);
+  const [deviceConnected, setDeviceConnected] = useState(false);
+  const [deviceType, setDeviceType] = useState<"simulator" | "real" | "farm" | "">("");
+  const [deviceScreenUrl, setDeviceScreenUrl] = useState<string | null>(null);
+  const [deviceLogs, setDeviceLogs] = useState<string | null>(null);
+
+  type DeviceLabStep = {
+    prompt: string;
+    code: string;
+    result: string; // e.g. "success", "error", etc.
+    output?: string; // logs, errors, etc.
+    screenshotUrl?: string;
+  };
+
+  const [deviceLabSteps, setDeviceLabSteps] = useState<DeviceLabStep[]>([]);
+  const [currentPrompt, setCurrentPrompt] = useState("");
+  const [executing, setExecuting] = useState(false);
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
@@ -275,6 +295,41 @@ export default function DeviceIQDashboard() {
     if (selectedPlan === id) setSelectedPlan(null);
   };
 
+  // Simulate device connection
+  const handleConnectDevice = (type: "simulator" | "real" | "farm") => {
+    setDeviceType(type);
+    setDeviceConnected(true);
+  };
+
+  // Simulate prompt-to-code (replace with Grok integration)
+  const handlePromptSubmit = async () => {
+    setDeviceLabResponse("Generating Appium script...");
+    // TODO: Replace this with a call to your Grok/LLM backend
+    setTimeout(() => {
+      setDeviceLabResponse(
+        `// Example Appium code for: "${deviceLabPrompt}"\n\nconst { Builder } = require('appium');\n// ...generated steps...`
+      );
+    }, 1200);
+  };
+
+  // Simulate AI + execution (replace with real backend)
+  const handleAddStep = async () => {
+    setExecuting(true);
+    // 1. Generate code from prompt (call your LLM backend)
+    const code = `// Appium code for: ${currentPrompt}\n// ...`;
+    // 2. Execute code on device (call your backend)
+    const result = "success"; // or "error"
+    const output = "Step executed successfully.";
+    // 3. Optionally, get screenshot URL
+    const screenshotUrl = undefined;
+    setDeviceLabSteps(prev => [
+      ...prev,
+      { prompt: currentPrompt, code, result, output, screenshotUrl }
+    ]);
+    setCurrentPrompt("");
+    setExecuting(false);
+  };
+
   return (
     <div>
       {/* Navigation Bar */}
@@ -301,6 +356,13 @@ export default function DeviceIQDashboard() {
             onClick={() => setPage('testplans')}
           >
             Test Plans
+          </a>
+          <a
+            href="#"
+            className={`hover:text-blue-400 transition ${page === 'devicelab' ? 'font-semibold underline underline-offset-4' : ''}`}
+            onClick={() => setPage('devicelab')}
+          >
+            Device Lab
           </a>
           <a href="#" className="hover:text-blue-400 transition">Settings</a>
           <a href="#" className="hover:text-blue-400 transition">Docs</a>
@@ -736,6 +798,83 @@ export default function DeviceIQDashboard() {
             >
               Load into Dashboard
             </Button>
+          )}
+        </div>
+      )}
+
+      {page === "devicelab" && (
+        <div className="p-6 max-w-2xl mx-auto space-y-6">
+          <h1 className="text-2xl font-bold mb-4">Device Lab (Prompt-based Test Designer)</h1>
+          {!deviceConnected ? (
+            <Card>
+              <CardContent className="space-y-4">
+                <div>Connect a device to begin:</div>
+                <div className="flex space-x-2">
+                  <Button onClick={() => handleConnectDevice("simulator")}>Connect Simulator</Button>
+                  <Button onClick={() => handleConnectDevice("real")}>Connect Real Device</Button>
+                  <Button onClick={() => handleConnectDevice("farm")}>Connect Device Farm</Button>
+                </div>
+              </CardContent>
+            </Card>
+          ) : (
+            <Card>
+              <CardContent className="space-y-4">
+                <div className="flex items-center space-x-2">
+                  <span className="font-semibold">Connected:</span>
+                  <span className="text-green-600">{deviceType}</span>
+                  <Button size="sm" variant="outline" onClick={() => setDeviceConnected(false)}>
+                    Disconnect
+                  </Button>
+                </div>
+                {/* Steps so far */}
+                <div>
+                  <h2 className="font-semibold mb-2">Test Steps</h2>
+                  <ol className="space-y-2">
+                    {deviceLabSteps.map((step, idx) => (
+                      <li key={idx} className="bg-gray-50 rounded p-2">
+                        <div className="font-mono text-xs text-gray-700 mb-1">Prompt: {step.prompt}</div>
+                        <pre className="bg-gray-100 p-2 rounded text-xs overflow-x-auto mb-1">{step.code}</pre>
+                        <div className={`text-xs ${step.result === "success" ? "text-green-600" : "text-red-600"}`}>
+                          {step.result}: {step.output}
+                        </div>
+                        {step.screenshotUrl && (
+                          <img src={step.screenshotUrl} alt="screenshot" className="mt-2 rounded border" />
+                        )}
+                      </li>
+                    ))}
+                  </ol>
+                </div>
+                {/* Prompt input */}
+                <Textarea
+                  placeholder="Describe the next step (e.g. 'Tap Login and enter credentials')"
+                  value={currentPrompt}
+                  onChange={e => setCurrentPrompt(e.target.value)}
+                  rows={2}
+                  disabled={executing}
+                />
+                <Button onClick={handleAddStep} disabled={!currentPrompt || executing}>
+                  {executing ? "Executing..." : "Add Step & Run"}
+                </Button>
+                {/* Export full script */}
+                {deviceLabSteps.length > 0 && (
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      const fullScript = deviceLabSteps.map(s => s.code).join('\n\n');
+                      const blob = new Blob([fullScript], { type: 'text/plain' });
+                      const url = URL.createObjectURL(blob);
+                      const a = document.createElement('a');
+                      a.href = url;
+                      a.download = 'appium-test.js';
+                      a.click();
+                      URL.revokeObjectURL(url);
+                    }}
+                  >
+                    Export Full Test Script
+                  </Button>
+                )}
+              </CardContent>
+            </Card>
           )}
         </div>
       )}
