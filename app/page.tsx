@@ -10,7 +10,7 @@ import { Progress } from '@/components/ui/progress';
 import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, LineChart, Line, ResponsiveContainer } from 'recharts';
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
 
-const TEST_FLOWS = ['LoginTest', 'SearchTest', 'AddToCartTest', 'CheckoutTest'];
+const DEFAULT_FLOWS = ['LoginTest', 'SearchTest', 'AddToCartTest', 'CheckoutTest'];
 
 interface DeviceMatrixRow {
   device_model: string;
@@ -20,6 +20,7 @@ interface DeviceMatrixRow {
 
 export default function DeviceIQDashboard() {
   const [csvFile, setCsvFile] = useState<File | null>(null);
+  const [availableFlows, setAvailableFlows] = useState<string[]>(DEFAULT_FLOWS);
   const [matrix, setMatrix] = useState<
     { device_model: string; os_version: string; usage_percent: number }[]
   >([]);
@@ -39,9 +40,9 @@ export default function DeviceIQDashboard() {
   const [aboutOpen, setAboutOpen] = useState(false);
   const [page, setPage] = useState<'home' | 'analytics' | 'testplans'>('home');
   const [analyticsData, setAnalyticsData] = useState<{
-    usage_distribution: any[];
-    cumulative_curve: any[];
-    os_version_breakdown: any[];
+    usage_distribution: unknown[];
+    cumulative_curve: unknown[];
+    os_version_breakdown: unknown[];
   } | null>(null);
   const [analyticsLoading, setAnalyticsLoading] = useState(false);
   const [analyticsError, setAnalyticsError] = useState('');
@@ -50,8 +51,22 @@ export default function DeviceIQDashboard() {
   const [exportFormat, setExportFormat] = useState<'csv' | 'json'>('csv');
   type ExecutionStatus = 'pending' | 'running' | 'passed' | 'failed';
   const [executionResults, setExecutionResults] = useState<Record<string, Record<string, ExecutionStatus>>>({});
-  const [testPlans, setTestPlans] = useState<{ id: string; name: string; data: any }[]>([]);
+  const [testPlans, setTestPlans] = useState<{ id: string; name: string; data: unknown }[]>([]);
   const [selectedPlan, setSelectedPlan] = useState<string | null>(null);
+
+  useEffect(() => {
+    const stored = localStorage.getItem('testFlows');
+    if (stored) {
+      try {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed)) {
+          setAvailableFlows(parsed);
+        }
+      } catch {
+        // ignore parse errors
+      }
+    }
+  }, []);
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
@@ -99,7 +114,7 @@ export default function DeviceIQDashboard() {
 
     for (const device of result.matrix as DeviceMatrixRow[]) {
       const key = `${device.device_model}_${device.os_version}`;
-      defaultPlan[key] = [...TEST_FLOWS];
+      defaultPlan[key] = [...availableFlows];
 
       if (pinnedDevices.has(key)) {
         pinnedRows.push(device);
@@ -167,7 +182,7 @@ export default function DeviceIQDashboard() {
   };
 
   const handleDownloadPlan = () => {
-    const data = matrix
+    const rows = matrix
       .filter(device => {
         const deviceKey = `${device.device_model}_${device.os_version}`;
         return !excludedDevices.has(deviceKey);
@@ -183,12 +198,13 @@ export default function DeviceIQDashboard() {
 
     let blob, filename;
     if (exportFormat === 'json') {
-      blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const exportData = { flows: availableFlows, rows };
+      blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
       filename = 'test-plan.json';
     } else {
       const csvContent =
         'Device Model,OS Version,Test Flows\n' +
-        data.map(row =>
+        rows.map(row =>
           [row.device_model, row.os_version, row.flows.join('|')].join(',')
         ).join('\n');
       blob = new Blob([csvContent], { type: 'text/csv' });
@@ -205,11 +221,6 @@ export default function DeviceIQDashboard() {
   // Colors for pie chart
   const COLORS = ['#4ade80', '#f87171'];
 
-  // Data for analytics charts
-  const coverageData = [
-    { name: 'Covered', value: summary?.covered_usage_percent ?? 0 },
-    { name: 'Uncovered', value: summary ? summary.total_usage_percent - summary.covered_usage_percent : 0 }
-  ];
 
   useEffect(() => {
     const covered = matrix.reduce((sum, d) => {
@@ -251,7 +262,7 @@ export default function DeviceIQDashboard() {
   };
 
   // Helper to download a plan
-  const handleDownloadSavedPlan = (plan: { id: string; name: string; data: any }) => {
+  const handleDownloadSavedPlan = (plan: { id: string; name: string; data: unknown }) => {
     const blob = new Blob([JSON.stringify(plan.data, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -294,7 +305,7 @@ export default function DeviceIQDashboard() {
           >
             Test Plans
           </a>
-          <a href="#" className="hover:text-blue-400 transition">Settings</a>
+          <a href="/settings" className="hover:text-blue-400 transition">Settings</a>
           <a href="#" className="hover:text-blue-400 transition">Docs</a>
           <button
             className="hover:text-blue-400 transition"
@@ -507,7 +518,7 @@ export default function DeviceIQDashboard() {
                               </DragDropContext>
                               {/* Unselected flows */}
                               <div className="mt-2">
-                                {TEST_FLOWS.filter(flow => !(testPlan[deviceKey] || []).includes(flow)).map(flow => (
+                                {availableFlows.filter(flow => !(testPlan[deviceKey] || []).includes(flow)).map(flow => (
                                   <div key={flow} className="flex items-center space-x-2 mb-1">
                                     <Checkbox
                                       checked={false}
@@ -520,7 +531,7 @@ export default function DeviceIQDashboard() {
                               </div>
                             </div>
                             <span className="text-xs text-gray-500 ml-2">
-                              {testPlan[deviceKey]?.length || 0}/{TEST_FLOWS.length} selected
+                              {testPlan[deviceKey]?.length || 0}/{availableFlows.length} selected
                             </span>
                             <div className="flex space-x-2 mt-2">
                               <Button
@@ -529,7 +540,11 @@ export default function DeviceIQDashboard() {
                                 onClick={() => {
                                   setPinnedDevices(prev => {
                                     const next = new Set(prev);
-                                    next.has(deviceKey) ? next.delete(deviceKey) : next.add(deviceKey);
+                                    if (next.has(deviceKey)) {
+                                      next.delete(deviceKey);
+                                    } else {
+                                      next.add(deviceKey);
+                                    }
                                     return next;
                                   });
                                 }}
@@ -543,7 +558,11 @@ export default function DeviceIQDashboard() {
                                 onClick={() => {
                                   setExcludedDevices(prev => {
                                     const next = new Set(prev);
-                                    next.has(deviceKey) ? next.delete(deviceKey) : next.add(deviceKey);
+                                    if (next.has(deviceKey)) {
+                                      next.delete(deviceKey);
+                                    } else {
+                                      next.add(deviceKey);
+                                    }
                                     return next;
                                   });
                                 }}
@@ -670,7 +689,7 @@ export default function DeviceIQDashboard() {
                 {(() => {
                   const plan = testPlans.find(p => p.id === selectedPlan);
                   if (!plan) return null;
-                  const rows = Array.isArray(plan.data) ? plan.data : [];
+                  const rows = Array.isArray(plan.data) ? plan.data : plan.data.rows || [];
                   return (
                     <>
                       <div className="mb-4 text-sm text-gray-700">
@@ -678,6 +697,10 @@ export default function DeviceIQDashboard() {
                         <div>
                           <strong>Total Flows:</strong>{" "}
                           {rows.reduce((sum, row) => sum + (row.flows?.length || 0), 0)}
+                        </div>
+                        <div>
+                          <strong>Available Flows:</strong>{" "}
+                          {(Array.isArray(plan.data) ? availableFlows : plan.data.flows || []).join(', ')}
                         </div>
                       </div>
                       <Table>
@@ -713,18 +736,22 @@ export default function DeviceIQDashboard() {
               size="sm"
               onClick={() => {
                 const plan = testPlans.find(p => p.id === selectedPlan);
-                if (plan && Array.isArray(plan.data)) {
-                  // Convert plan.data back to your matrix and testPlan state shape
-                  setMatrix(plan.data.map(({ device_model, os_version, usage_percent }) => ({
+                if (!plan) return;
+                const rows = Array.isArray(plan.data) ? plan.data : plan.data.rows;
+                const flows = Array.isArray(plan.data) ? availableFlows : (plan.data.flows || availableFlows);
+                if (rows) {
+                  setMatrix(rows.map(({ device_model, os_version, usage_percent }) => ({
                     device_model,
                     os_version,
                     usage_percent: usage_percent ?? 0
                   })));
                   const newTestPlan: Record<string, string[]> = {};
-                  plan.data.forEach((row: any) => {
+                  (rows as Array<{ device_model: string; os_version: string; flows?: string[] }>).forEach(row => {
                     const key = `${row.device_model}_${row.os_version}`;
                     newTestPlan[key] = row.flows || [];
                   });
+                  setAvailableFlows(flows);
+                  localStorage.setItem('testFlows', JSON.stringify(flows));
                   setTestPlan(newTestPlan);
                   setPage('home');
                 }
