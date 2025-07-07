@@ -92,33 +92,25 @@ export default function DeviceIQDashboard() {
 
     const result = await res.json();
 
-    // Apply exclusion
-    let filteredMatrix = result.matrix.filter((device: any) => {
-      const key = `${device.device_model}_${device.os_version}`;
-      return !excludedDevices.has(key);
-    });
-
-    // Always include pinned devices
-    const pinnedRows = result.matrix.filter((device: any) => {
-      const key = `${device.device_model}_${device.os_version}`;
-      return pinnedDevices.has(key);
-    });
-
-    // Remove duplicates if a pinned device is already in filteredMatrix
-    const pinnedKeys = new Set(pinnedRows.map((d: any) => `${d.device_model}_${d.os_version}`));
-    filteredMatrix = [
-      ...pinnedRows,
-      ...filteredMatrix.filter((d: any) => !pinnedKeys.has(`${d.device_model}_${d.os_version}`))
-    ];
-
-    setMatrix(filteredMatrix);
-
-    // Default plan: all flows enabled per device
+    // Build matrix in a single pass while respecting pinned/excluded states
+    const pinnedRows: DeviceMatrixRow[] = [];
+    const unpinnedRows: DeviceMatrixRow[] = [];
     const defaultPlan: Record<string, string[]> = {};
-    filteredMatrix.forEach((device: { device_model: string; os_version: string; usage_percent: number }) => {
+
+    for (const device of result.matrix as DeviceMatrixRow[]) {
       const key = `${device.device_model}_${device.os_version}`;
       defaultPlan[key] = [...TEST_FLOWS];
-    });
+
+      if (pinnedDevices.has(key)) {
+        pinnedRows.push(device);
+      } else if (!excludedDevices.has(key)) {
+        unpinnedRows.push(device);
+      }
+    }
+
+    const filteredMatrix = [...pinnedRows, ...unpinnedRows];
+
+    setMatrix(filteredMatrix);
     setTestPlan(defaultPlan);
 
     // Calculate total coverage
@@ -151,15 +143,15 @@ export default function DeviceIQDashboard() {
       if (!res.ok) {
         const error = await res.json();
         setAnalyticsError(error.detail || "Unknown error");
-        setAnalyticsLoading(false);
         return;
       }
       const data = await res.json();
       setAnalyticsData(data);
-    } catch (err) {
+    } catch {
       setAnalyticsError('Failed to fetch analytics');
+    } finally {
+      setAnalyticsLoading(false);
     }
-    setAnalyticsLoading(false);
   };
 
   const handleCheckboxChange = (deviceKey: string, flow: string) => {
@@ -443,14 +435,18 @@ export default function DeviceIQDashboard() {
                     </TableRow>
                   </thead>
                   <TableBody>
-                    {matrix.filter(device =>
-                      (device.device_model?.toLowerCase().includes(filter.toLowerCase()) ?? false) ||
-                      (device.os_version?.toLowerCase().includes(filter.toLowerCase()) ?? false)
-                    ).map((device, idx) => {
-                      const deviceKey = `${device.device_model}_${device.os_version}`;
-                      const isExcluded = excludedDevices.has(deviceKey);
-                      return (
-                        <TableRow className={idx % 2 === 0 ? "bg-gray-50" : ""} key={idx}>
+                    {matrix
+                      .filter(device => {
+                        const lowerFilter = filter.toLowerCase();
+                        const model = device.device_model?.toLowerCase() ?? "";
+                        const version = device.os_version?.toLowerCase() ?? "";
+                        return model.includes(lowerFilter) || version.includes(lowerFilter);
+                      })
+                      .map((device, idx) => {
+                        const deviceKey = `${device.device_model}_${device.os_version}`;
+                        const isExcluded = excludedDevices.has(deviceKey);
+                        return (
+                          <TableRow className={idx % 2 === 0 ? "bg-gray-50" : ""} key={deviceKey}>
                           <TableCell>{device.device_model}</TableCell>
                           <TableCell>{device.os_version}</TableCell>
                           <TableCell>{device.usage_percent}%</TableCell>
@@ -558,7 +554,7 @@ export default function DeviceIQDashboard() {
                           </TableCell>
                         </TableRow>
                       );
-                    })}
+                      })}
                   </TableBody>
                 </Table>
                 <div className="flex items-center space-x-2 mb-4">
